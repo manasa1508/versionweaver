@@ -179,6 +179,36 @@ class OutboxEventRead(BaseModel):
     last_error: str | None
 
 
+class JobRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    change_id: str
+    status: str
+    attempts: int
+    max_attempts: int
+    lease_owner: str | None
+    lease_expires_at: datetime | None
+    last_error: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class DashboardSummary(BaseModel):
+    project_count: int
+    change_count: int
+    active_change_count: int
+    evidence_count: int
+    queue_depth: int
+    dead_letter_count: int
+    unpublished_event_count: int
+    success_rate: float
+    changes_by_status: dict[str, int]
+    changes_by_kind: dict[str, int]
+    jobs_by_status: dict[str, int]
+    generated_at: datetime
+
+
 class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     database: Literal["ok", "error"]

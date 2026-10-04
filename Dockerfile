@@ -1,3 +1,11 @@
+FROM node:24-alpine AS web-builder
+
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web ./
+RUN npm run build
+
 FROM python:3.12-slim AS builder
 
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
@@ -16,7 +24,9 @@ WORKDIR /app
 ENV PATH="/app/.venv/bin:$PATH"
 ENV VERSIONWEAVER_DATABASE_URL="sqlite:////data/versionweaver.sqlite3"
 ENV VERSIONWEAVER_ARTIFACT_DIR="/data/artifacts"
+ENV VERSIONWEAVER_WEB_DIST_DIR="/app/web"
 COPY --from=builder /app/.venv /app/.venv
+COPY --from=web-builder /web/dist /app/web
 COPY alembic.ini ./
 COPY migrations ./migrations
 USER versionweaver

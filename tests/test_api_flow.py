@@ -100,3 +100,82 @@ def test_health_is_public(client: TestClient) -> None:
     response = client.get("/health/ready")
     assert response.status_code == 200
     assert response.json()["database"] == "ok"
+
+
+def test_console_read_models_are_paginated_and_aggregated(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    source = str(Path(__file__).parents[1] / "examples" / "python-ai-app")
+    project_ids: list[str] = []
+    for index in range(2):
+        response = client.post(
+            "/api/v1/projects",
+            headers=auth_headers,
+            json={
+                "name": f"console-project-{index}",
+                "source_uri": source,
+                "default_branch": "main",
+            },
+        )
+        assert response.status_code == 201
+        project_ids.append(response.json()["id"])
+
+    first_page = client.get("/api/v1/projects?limit=1", headers=auth_headers)
+    assert first_page.status_code == 200
+    assert len(first_page.json()) == 1
+    cursor = first_page.headers["X-Next-Cursor"]
+    second_page = client.get(
+        "/api/v1/projects", headers=auth_headers, params={"limit": 1, "cursor": cursor}
+    )
+    assert second_page.status_code == 200
+    assert len(second_page.json()) == 1
+    assert second_page.json()[0]["id"] != first_page.json()[0]["id"]
+
+    change_response = client.post(
+        "/api/v1/changes",
+        headers=auth_headers,
+        json={
+            "project_id": project_ids[0],
+            "title": "Upgrade console dependency",
+            "requested_by": "console-user",
+            "spec": {
+                "kind": "dependency",
+                "dependency_name": "pydantic",
+                "to_version": "2.10.0",
+            },
+        },
+    )
+    assert change_response.status_code == 201
+    change = change_response.json()
+
+    summary = client.get("/api/v1/dashboard/summary", headers=auth_headers)
+    assert summary.status_code == 200
+    assert summary.json()["project_count"] == 2
+    assert summary.json()["change_count"] == 1
+    assert summary.json()["changes_by_status"] == {"planned": 1}
+
+    approval = client.post(
+        f"/api/v1/changes/{change['id']}/approve",
+        headers=auth_headers,
+        json={"actor": "console-approver", "expected_version": change["version"]},
+    )
+    assert approval.status_code == 200
+
+    jobs = client.get("/api/v1/jobs?status=queued", headers=auth_headers)
+    assert jobs.status_code == 200
+    assert len(jobs.json()) == 1
+    assert jobs.json()[0]["change_id"] == change["id"]
+    assert "lease_token" not in jobs.json()[0]
+
+    filtered = client.get(
+        "/api/v1/changes",
+        headers=auth_headers,
+        params={"kind": "dependency", "search": "console"},
+    )
+    assert filtered.status_code == 200
+    assert [item["id"] for item in filtered.json()] == [change["id"]]
+
+    invalid_cursor = client.get(
+        "/api/v1/jobs", headers=auth_headers, params={"cursor": "not-a-cursor"}
+    )
+    assert invalid_cursor.status_code == 400

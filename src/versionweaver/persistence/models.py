@@ -19,6 +19,7 @@ def now_utc() -> datetime:
 
 class Project(Base):
     __tablename__ = "projects"
+    __table_args__ = (Index("ix_projects_created", "created_at", "id"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_string)
     name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
@@ -39,6 +40,8 @@ class ChangeRequest(Base):
     __tablename__ = "change_requests"
     __table_args__ = (
         UniqueConstraint("idempotency_key", name="uq_change_requests_idempotency_key"),
+        Index("ix_changes_created", "created_at", "id"),
+        Index("ix_changes_project_created", "project_id", "created_at", "id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_string)
@@ -73,6 +76,7 @@ class Job(Base):
     __tablename__ = "jobs"
     __table_args__ = (
         Index("ix_jobs_lease", "status", "lease_expires_at", "created_at"),
+        Index("ix_jobs_created", "created_at", "id"),
         UniqueConstraint("idempotency_key", name="uq_jobs_idempotency_key"),
     )
 
@@ -112,6 +116,7 @@ class Evidence(Base):
 
 class AuditEvent(Base):
     __tablename__ = "audit_events"
+    __table_args__ = (Index("ix_audit_created", "created_at", "id"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_string)
     change_id: Mapped[str | None] = mapped_column(

@@ -5,12 +5,15 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
 from versionweaver import __version__
 from versionweaver.api.dependencies import require_admin_token
 from versionweaver.api.routes import admin_router, control_router, public_router, runner_router
+from versionweaver.api.web import mount_web_ui
 from versionweaver.config import get_settings
 from versionweaver.logging import configure_logging
 from versionweaver.observability.metrics import metrics_response, record_request
@@ -33,6 +36,18 @@ app = FastAPI(
     description="Dependency and AI model migration control plane",
     lifespan=lifespan,
 )
+settings = get_settings()
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+cors_origins = settings.parsed_cors_origins()
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Request-ID"],
+        expose_headers=["X-Next-Cursor", "X-Request-ID"],
+    )
 app.include_router(public_router)
 app.include_router(runner_router)
 app.include_router(control_router)
@@ -61,7 +76,22 @@ async def request_context(
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+        "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; "
+        "frame-ancestors 'none'"
+    )
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    elif request.url.path.startswith("/assets/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif response.headers.get("content-type", "").startswith("text/html"):
+        response.headers["Cache-Control"] = "no-cache"
     route_object = request.scope.get("route")
     route = getattr(route_object, "path", "unmatched")
     record_request(request.method, route, response.status_code, time.monotonic() - started)
     return response
+
+
+mount_web_ui(app, settings.web_dist_dir)

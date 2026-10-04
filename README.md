@@ -15,6 +15,8 @@ runs baseline and candidate verification, and returns checksummed evidence.
 
 - FastAPI control plane with role-scoped developer/admin/runner tokens, health endpoints, projects,
   approvals, durable jobs, runner leases, heartbeats, evidence, and audit events.
+- Responsive React and TypeScript operations console for project registration, migration planning,
+  approvals, queue monitoring, evidence inspection, and administrator audit history.
 - Typer CLI for local scanning, project registration, change creation, approval, status, and
   runner operation.
 - PostgreSQL production storage and SQLite development storage.
@@ -39,6 +41,10 @@ uv sync --extra dev
 uv run versionweaver init-db
 uv run versionweaver serve
 ```
+
+Open `http://localhost:8000` after building the console with `npm --prefix web ci && npm --prefix
+web run build`. Enter the configured developer token; add the admin token to unlock the audit view.
+For frontend development, run `npm --prefix web run dev`; Vite proxies API calls to port 8000.
 
 In another terminal, register and scan the example repository:
 
@@ -80,13 +86,16 @@ and evidence format. See [architecture](docs/architecture.md) and
 ## Hosting
 
 The API and PostgreSQL database can run on Render, Railway, Fly.io, Koyeb, or any container host.
-Static documentation or a future frontend can run on Netlify. Migration jobs run on registered
-self-hosted runners because they require a general-purpose container sandbox.
+The production container serves the compiled console and API from one origin. The console can also
+run on Netlify when `VERSIONWEAVER_CORS_ALLOWED_ORIGINS` explicitly lists its HTTPS origin. Migration
+jobs run on registered self-hosted runners because they require a general-purpose container sandbox.
 
 Free tiers change frequently and often sleep, limit background workers, or provide ephemeral disks.
 Use PostgreSQL plus S3-compatible storage for any durable hosted deployment.
 
 See the [deployment guide](docs/deployment.md) and [operator runbook](docs/runbook.md).
+The [UI architecture guide](docs/ui-architecture.md) explains frontend boundaries, caching,
+authentication evolution, scaling, reliability, and failure handling.
 For a concept-by-concept learning path, read the
 [production system-design patterns guide](docs/system-design-patterns.md).
 

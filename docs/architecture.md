@@ -9,7 +9,7 @@ one workflow and remain deployable on any container platform.
 ## Final MVP architecture
 
 ```text
-CLI / CI / future UI
+React console / CLI / CI
         |
         v
 FastAPI control plane ---------------------- PostgreSQL
@@ -47,6 +47,7 @@ This keeps deployment simple while preserving boundaries that can later become s
 | Component | Responsibility | Explicitly does not do |
 |---|---|---|
 | CLI | Scan a local repository and call authenticated API workflows | Persist authoritative state |
+| React console | Present read models and invoke governed workflow commands | Execute repositories, hold runner credentials, or become a source of truth |
 | FastAPI control plane | Validate requests, assess risk, enforce approval, lease jobs, expose evidence | Clone repositories or run their code |
 | PostgreSQL | Projects, typed change specs, status, job leases, evidence metadata, audit events | Store source repositories |
 | Artifact adapter | Persist canonical evidence JSON in local or S3-compatible storage | Decide whether a change passed |
@@ -228,6 +229,7 @@ with command logs and diffs, so output is bounded and object lifecycle rules sho
 2. Move artifacts to S3-compatible object storage.
 3. Add read replicas and a connection pooler when metrics justify them.
 4. Replace the job adapter with NATS, RabbitMQ, or a managed queue without changing the domain.
-5. Add a frontend against the existing API.
+5. Scale the stateless React console through CDN caching of immutable assets; keep authenticated API
+   responses uncached and use keyset pagination for growing operational tables.
 6. Replace static scoped tokens with OIDC workload/user identities and tenant-aware RBAC before
    multiple organizations share one control plane.

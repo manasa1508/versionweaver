@@ -1,4 +1,4 @@
-.PHONY: install format lint type test check run compose
+.PHONY: install format lint type test web-install web-check web-dev build check run compose
 
 install:
 	uv sync --extra dev
@@ -17,11 +17,23 @@ type:
 test:
 	uv run pytest --cov=versionweaver --cov-report=term-missing
 
-check: lint type test
+web-install:
+	npm --prefix web ci
+
+web-check:
+	npm --prefix web run check
+	npm --prefix web run test
+	npm --prefix web run build
+
+web-dev:
+	npm --prefix web run dev
+
+build: web-check
+
+check: lint type test web-check
 
 run:
 	uv run versionweaver serve
 
 compose:
 	docker compose up --build
-

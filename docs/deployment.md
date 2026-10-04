@@ -2,12 +2,12 @@
 
 ## Recommended starter topology
 
-Use Render for the API and PostgreSQL, an S3-compatible object store for evidence, and one trusted
-developer machine or CI agent as the runner. Netlify can host a later static frontend, but it is
-not part of the execution trust boundary.
+Use Render for the same-origin web console/API and PostgreSQL, an S3-compatible object store for
+evidence, and one trusted developer machine or CI agent as the runner. The React bundle is compiled
+in the Docker build and served by FastAPI; it is not part of the execution trust boundary.
 
 ```text
-Browser / CLI
+Browser console / CLI
       |
       v
 Render HTTPS -> VersionWeaver API -> PostgreSQL
@@ -44,7 +44,8 @@ optional configuration, not a hard dependency.
 
 1. Copy `.env.example` to `.env` and replace the development token.
 2. Run `docker compose up --build`.
-3. Confirm `http://localhost:8000/health/ready` returns `database: ok`.
+3. Open `http://localhost:8000`, connect with the configured developer token, and confirm
+   `/health/ready` returns `database: ok`.
 4. On the trusted host, run `uv sync`, configure the runner token (the development API token is a
    deliberate local fallback), and start
    `uv run versionweaver runner`.
@@ -72,12 +73,16 @@ idle time and its filesystem is ephemeral. Its free PostgreSQL offering also exp
 managed backups, and is capacity-limited. Export data or use a durable PostgreSQL provider before
 real use.
 
-## Netlify placement
+## Separate Netlify placement
 
-Use Netlify only for a static React/Astro/Vite frontend or generated documentation. Configure that
-frontend with the public API URL and keep the API token out of browser code. Before a public UI is
-added, replace the single service token with an OAuth/OIDC backend-for-frontend flow. The current
-API is intended for CLI/CI and trusted demos.
+The same-origin container is preferred. To host `web/dist` on Netlify, set the UI's API URL on the
+connection screen and set `VERSIONWEAVER_CORS_ALLOWED_ORIGINS=https://your-site.netlify.app` on the
+API. Never use `*`; credentials are authorization headers and CORS is not authentication.
+
+Static role tokens in `sessionStorage` are appropriate only for local use and trusted demos. Before
+exposing a multi-user public console, add an OIDC backend-for-frontend that exchanges the identity
+provider callback server-side and stores a short-lived session in `Secure`, `HttpOnly`, `SameSite`
+cookies. Do not embed a service token in a Vite environment variable or JavaScript bundle.
 
 ## Production promotion checklist
 

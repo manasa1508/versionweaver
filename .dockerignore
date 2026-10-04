@@ -12,3 +12,5 @@ tests
 docs
 examples
 .env
+web/node_modules
+web/dist

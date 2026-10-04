@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     admin_api_token: str | None = None
     public_base_url: str = "http://localhost:8000"
     log_level: str = "INFO"
+    cors_allowed_origins: str = ""
+    web_dist_dir: Path = Path("./web/dist")
 
     artifact_backend: Literal["local", "s3"] = "local"
     artifact_dir: Path = Path("./artifacts")
@@ -39,6 +41,9 @@ class Settings(BaseSettings):
     allow_unsafe_local_execution: bool = False
     model_base_url: str = "http://localhost:11434/v1"
     model_api_key: str | None = None
+
+    def parsed_cors_origins(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
     @field_validator("api_token")
     @classmethod

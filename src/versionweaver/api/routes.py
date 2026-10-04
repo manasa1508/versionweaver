@@ -1,7 +1,8 @@
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
-from sqlalchemy import and_, or_, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from versionweaver import __version__
@@ -22,6 +23,7 @@ from versionweaver.application.service import (
     lease_job,
 )
 from versionweaver.config import get_settings
+from versionweaver.domain.enums import ChangeStatus, JobStatus
 from versionweaver.evidence.store import build_artifact_store
 from versionweaver.persistence.database import get_session
 from versionweaver.persistence.models import (
@@ -38,12 +40,14 @@ from versionweaver.schemas import (
     CancellationRequest,
     ChangeCreate,
     ChangeRead,
+    DashboardSummary,
     EvidenceRead,
     HealthResponse,
     InventoryUpload,
     JobCompletion,
     JobHeartbeat,
     JobPayload,
+    JobRead,
     OutboxEventRead,
     ProjectCreate,
     ProjectRead,
@@ -70,11 +74,12 @@ def live() -> dict[str, str]:
 
 
 @public_router.get("/health/ready", response_model=HealthResponse)
-def ready(session: SessionDependency) -> HealthResponse:
+def ready(response: Response, session: SessionDependency) -> HealthResponse:
     try:
         session.execute(text("SELECT 1"))
         return HealthResponse(status="ok", database="ok", version=__version__)
     except Exception:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return HealthResponse(status="degraded", database="error", version=__version__)
 
 
@@ -89,9 +94,94 @@ def create_project(request: ProjectCreate, session: SessionDependency) -> Projec
     return project
 
 
+@control_router.get("/dashboard/summary", response_model=DashboardSummary)
+def dashboard_summary(session: SessionDependency) -> DashboardSummary:
+    change_rows = session.execute(
+        select(ChangeRequest.status, func.count(ChangeRequest.id)).group_by(ChangeRequest.status)
+    ).all()
+    kind_rows = session.execute(
+        select(ChangeRequest.kind, func.count(ChangeRequest.id)).group_by(ChangeRequest.kind)
+    ).all()
+    job_rows = session.execute(select(Job.status, func.count(Job.id)).group_by(Job.status)).all()
+    changes_by_status = {str(row[0]): int(row[1]) for row in change_rows}
+    changes_by_kind = {str(row[0]): int(row[1]) for row in kind_rows}
+    jobs_by_status = {str(row[0]): int(row[1]) for row in job_rows}
+
+    active_statuses = {
+        ChangeStatus.PLANNED.value,
+        ChangeStatus.APPROVED.value,
+        ChangeStatus.QUEUED.value,
+        ChangeStatus.RUNNING.value,
+        ChangeStatus.VERIFYING.value,
+    }
+    finished = sum(
+        changes_by_status.get(status_value, 0)
+        for status_value in (
+            ChangeStatus.SUCCEEDED.value,
+            ChangeStatus.FAILED.value,
+            ChangeStatus.BLOCKED.value,
+        )
+    )
+    succeeded = changes_by_status.get(ChangeStatus.SUCCEEDED.value, 0)
+    queue_depth = sum(
+        jobs_by_status.get(status_value, 0)
+        for status_value in (
+            JobStatus.QUEUED.value,
+            JobStatus.LEASED.value,
+            JobStatus.RUNNING.value,
+        )
+    )
+    return DashboardSummary(
+        project_count=session.scalar(select(func.count()).select_from(Project)) or 0,
+        change_count=sum(changes_by_status.values()),
+        active_change_count=sum(
+            count
+            for status_value, count in changes_by_status.items()
+            if status_value in active_statuses
+        ),
+        evidence_count=session.scalar(select(func.count()).select_from(Evidence)) or 0,
+        queue_depth=queue_depth,
+        dead_letter_count=jobs_by_status.get(JobStatus.DEAD_LETTER.value, 0),
+        unpublished_event_count=session.scalar(
+            select(func.count()).select_from(OutboxEvent).where(OutboxEvent.published_at.is_(None))
+        )
+        or 0,
+        success_rate=round((succeeded / finished) * 100, 1) if finished else 0.0,
+        changes_by_status=changes_by_status,
+        changes_by_kind=changes_by_kind,
+        jobs_by_status=jobs_by_status,
+        generated_at=datetime.now(UTC),
+    )
+
+
 @control_router.get("/projects", response_model=list[ProjectRead])
-def list_projects(session: SessionDependency) -> list[Project]:
-    return list(session.scalars(select(Project).order_by(Project.created_at.desc())))
+def list_projects(
+    response: Response,
+    session: SessionDependency,
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    search: str | None = Query(default=None, min_length=1, max_length=120),
+) -> list[Project]:
+    statement = select(Project).order_by(Project.created_at.desc(), Project.id.desc())
+    if search:
+        statement = statement.where(Project.name.ilike(f"%{search}%"))
+    if cursor:
+        try:
+            created_at, item_id = decode_cursor(cursor)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        statement = statement.where(
+            or_(
+                Project.created_at < created_at,
+                and_(Project.created_at == created_at, Project.id < item_id),
+            )
+        )
+    items = list(session.scalars(statement.limit(limit + 1)))
+    if len(items) > limit:
+        last = items[limit - 1]
+        response.headers["X-Next-Cursor"] = encode_cursor(last.created_at, last.id)
+        items = items[:limit]
+    return items
 
 
 @control_router.get("/projects/{project_id}", response_model=ProjectRead)
@@ -131,13 +221,43 @@ def post_change(
 
 @control_router.get("/changes", response_model=list[ChangeRead])
 def list_changes(
+    response: Response,
     session: SessionDependency,
     project_id: str | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status", max_length=32),
+    kind: str | None = Query(default=None, max_length=32),
+    search: str | None = Query(default=None, min_length=1, max_length=240),
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
 ) -> list[ChangeRequest]:
-    statement = select(ChangeRequest).order_by(ChangeRequest.created_at.desc())
+    statement = select(ChangeRequest).order_by(
+        ChangeRequest.created_at.desc(), ChangeRequest.id.desc()
+    )
     if project_id:
         statement = statement.where(ChangeRequest.project_id == project_id)
-    return list(session.scalars(statement))
+    if status_filter:
+        statement = statement.where(ChangeRequest.status == status_filter)
+    if kind:
+        statement = statement.where(ChangeRequest.kind == kind)
+    if search:
+        statement = statement.where(ChangeRequest.title.ilike(f"%{search}%"))
+    if cursor:
+        try:
+            created_at, item_id = decode_cursor(cursor)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        statement = statement.where(
+            or_(
+                ChangeRequest.created_at < created_at,
+                and_(ChangeRequest.created_at == created_at, ChangeRequest.id < item_id),
+            )
+        )
+    items = list(session.scalars(statement.limit(limit + 1)))
+    if len(items) > limit:
+        last = items[limit - 1]
+        response.headers["X-Next-Cursor"] = encode_cursor(last.created_at, last.id)
+        items = items[:limit]
+    return items
 
 
 @control_router.get("/changes/{change_id}", response_model=ChangeRead)
@@ -232,6 +352,36 @@ def evidence_content(evidence_id: str, session: SessionDependency) -> dict[str, 
         raise HTTPException(status_code=404, detail="evidence not found")
     document = build_artifact_store(get_settings()).get_json(evidence.storage_uri)
     return document
+
+
+@control_router.get("/jobs", response_model=list[JobRead])
+def list_jobs(
+    response: Response,
+    session: SessionDependency,
+    change_id: str | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status", max_length=32),
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[Job]:
+    statement = select(Job).order_by(Job.created_at.desc(), Job.id.desc())
+    if change_id:
+        statement = statement.where(Job.change_id == change_id)
+    if status_filter:
+        statement = statement.where(Job.status == status_filter)
+    if cursor:
+        try:
+            created_at, item_id = decode_cursor(cursor)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        statement = statement.where(
+            or_(Job.created_at < created_at, and_(Job.created_at == created_at, Job.id < item_id))
+        )
+    items = list(session.scalars(statement.limit(limit + 1)))
+    if len(items) > limit:
+        last = items[limit - 1]
+        response.headers["X-Next-Cursor"] = encode_cursor(last.created_at, last.id)
+        items = items[:limit]
+    return items
 
 
 @control_router.get("/jobs/{job_id}")

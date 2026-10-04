@@ -29,11 +29,11 @@ evidence while reducing manual investigation and preventing unverifiable autonom
 7. Durable jobs, retries, leases, audit events, and evidence.
 8. CLI and REST API.
 9. PostgreSQL, local/S3-compatible artifacts, Docker Compose, and Render deployment.
+10. A responsive operations console for projects, change governance, jobs, evidence, and audit data.
 
 ## Out of scope for MVP
 
 - Automatic merge or deployment.
-- A graphical frontend.
 - JavaScript, Java, Go, and .NET package ecosystems.
 - Model training or fine-tuning.
 - Kubernetes and Kafka.
@@ -94,6 +94,12 @@ errors. The API stores artifact metadata and an append-only audit trail.
 Model evaluation uses a provider interface. The default network adapter implements the widely used
 OpenAI-compatible HTTP shape and supports Ollama without proprietary SDKs.
 
+### FR-12 — Operate through a visual console
+
+Developers can register projects, create dependency or model changes, approve or cancel work, and
+inspect verification evidence. Operators can monitor queue attempts, leases, dead-lettered jobs,
+and aggregate health. Admin-scoped users can inspect keyset-paginated audit history.
+
 ## Non-functional requirements
 
 - All state changes are transactional and auditable.
@@ -106,6 +112,10 @@ OpenAI-compatible HTTP shape and supports Ollama without proprietary SDKs.
 - Storage and provider implementations are replaceable through interfaces.
 - Production database connections use TLS.
 - Health and readiness endpoints are available without authentication.
+- Growing console collections use indexed keyset pagination rather than unbounded reads.
+- Static UI assets are immutable and compressible; authenticated API responses are never cached.
+- The same-origin deployment is the secure default; cross-origin access requires an explicit
+  allowlist.
 
 ## MVP acceptance criteria
 
@@ -116,4 +126,5 @@ OpenAI-compatible HTTP shape and supports Ollama without proprietary SDKs.
 5. Duplicate completion is rejected without corrupting evidence.
 6. Baseline failure prevents candidate execution by default.
 7. API integration and core unit tests pass in CI.
-
+8. TypeScript checks, frontend unit tests, production bundle generation, and the multi-stage Docker
+   build pass in CI.
