@@ -21,9 +21,7 @@ def upgrade() -> None:
         batch.add_column(sa.Column("idempotency_key", sa.String(160), nullable=True))
         batch.add_column(sa.Column("request_hash", sa.String(64), nullable=True))
         batch.add_column(sa.Column("version", sa.Integer(), nullable=False, server_default="1"))
-        batch.create_unique_constraint(
-            "uq_change_requests_idempotency_key", ["idempotency_key"]
-        )
+        batch.create_unique_constraint("uq_change_requests_idempotency_key", ["idempotency_key"])
     op.create_table(
         "outbox_events",
         sa.Column("id", sa.String(36), primary_key=True),
