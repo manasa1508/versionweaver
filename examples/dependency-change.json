@@ -1,0 +1,10 @@
+{
+  "kind": "dependency",
+  "dependency_name": "pydantic",
+  "from_version": "2.9.0",
+  "to_version": "2.10.0",
+  "verification_commands": ["python -m compileall -q ."],
+  "allow_network": false,
+  "timeout_seconds": 120
+}
+

@@ -1,0 +1,44 @@
+databases:
+  - name: versionweaver-db
+    databaseName: versionweaver
+    user: versionweaver
+    plan: free
+    region: singapore
+
+services:
+  - type: web
+    name: versionweaver-api
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerCommand: /bin/sh -c "alembic upgrade head && uvicorn versionweaver.api.app:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health/ready
+    envVars:
+      - key: VERSIONWEAVER_ENVIRONMENT
+        value: production
+      - key: VERSIONWEAVER_DATABASE_URL
+        fromDatabase:
+          name: versionweaver-db
+          property: connectionString
+      - key: VERSIONWEAVER_API_TOKEN
+        generateValue: true
+      - key: VERSIONWEAVER_ADMIN_API_TOKEN
+        generateValue: true
+      - key: VERSIONWEAVER_RUNNER_API_TOKEN
+        generateValue: true
+      - key: VERSIONWEAVER_ARTIFACT_BACKEND
+        value: s3
+      - key: VERSIONWEAVER_S3_ENDPOINT_URL
+        sync: false
+      - key: VERSIONWEAVER_S3_BUCKET
+        sync: false
+      - key: VERSIONWEAVER_S3_REGION
+        sync: false
+      - key: VERSIONWEAVER_S3_ACCESS_KEY_ID
+        sync: false
+      - key: VERSIONWEAVER_S3_SECRET_ACCESS_KEY
+        sync: false
+
+  # Run the runner on a trusted developer/CI host with Docker or Podman. The Render API
+  # intentionally receives neither a container socket nor permission to execute repository code.

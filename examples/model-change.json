@@ -1,0 +1,24 @@
+{
+  "kind": "model",
+  "from_provider": "ollama",
+  "to_provider": "ollama",
+  "from_model": "qwen2.5:0.5b",
+  "to_model": "qwen3:0.6b",
+  "model_base_url": "http://host.docker.internal:11434/v1",
+  "verification_commands": ["python -m compileall -q ."],
+  "evaluation_cases": [
+    {
+      "id": "valid-json",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Return only JSON with a key named status and the value ok."
+        }
+      ],
+      "required_json_keys": ["status"]
+    }
+  ],
+  "allow_network": false,
+  "timeout_seconds": 120
+}
+

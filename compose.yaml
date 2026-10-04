@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: versionweaver
+      POSTGRES_USER: versionweaver
+      POSTGRES_PASSWORD: versionweaver-dev-password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U versionweaver"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: versionweaver
+      MINIO_ROOT_PASSWORD: versionweaver-dev-secret
+    ports:
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 versionweaver versionweaver-dev-secret; do sleep 2; done;
+      mc mb --ignore-existing local/versionweaver-evidence;
+      exit 0;"
+
+  api:
+    build: .
+    command: >
+      /bin/sh -c "alembic upgrade head &&
+      uvicorn versionweaver.api.app:app --host 0.0.0.0 --port 8000"
+    environment:
+      VERSIONWEAVER_ENVIRONMENT: development
+      VERSIONWEAVER_DATABASE_URL: postgresql+psycopg://versionweaver:versionweaver-dev-password@postgres:5432/versionweaver
+      VERSIONWEAVER_API_TOKEN: change-me-before-hosting
+      VERSIONWEAVER_ARTIFACT_BACKEND: s3
+      VERSIONWEAVER_S3_ENDPOINT_URL: http://minio:9000
+      VERSIONWEAVER_S3_BUCKET: versionweaver-evidence
+      VERSIONWEAVER_S3_ACCESS_KEY_ID: versionweaver
+      VERSIONWEAVER_S3_SECRET_ACCESS_KEY: versionweaver-dev-secret
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - "8000:8000"
+
+volumes:
+  postgres-data:
+  minio-data:
